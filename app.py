@@ -392,6 +392,7 @@ Remember:
         if m not in candidate_models:
             candidate_models.append(m)
 
+    quota_hit = False
     last_error = None
     for model in candidate_models:
         if status_box:
@@ -413,7 +414,6 @@ Remember:
                         config=fast_config
                     )
                 except Exception as config_err:
-                    # If model doesn't support thinking_config, fall back to standard config
                     standard_config = types.GenerateContentConfig(
                         system_instruction=SYSTEM_INSTRUCTION,
                         temperature=0.9,
@@ -424,6 +424,14 @@ Remember:
                         contents=user_prompt,
                         config=standard_config
                     )
+                
+                # Check for safety blocks
+                if response and not response.text:
+                    if hasattr(response, "candidates") and response.candidates:
+                        finish_reason = getattr(response.candidates[0], "finish_reason", "")
+                        if "SAFETY" in str(finish_reason):
+                            raise RuntimeError("Google AI safety guidelines declined this prompt. Jokes targeting recent deaths, grief, or personal bereavement are restricted. Please choose relatable family banter topics (ghosting, weddings, borrowed money) instead.")
+                
                 if response and response.text:
                     return response.text, model
             except Exception as e:
@@ -433,33 +441,29 @@ Remember:
                 if "503" in err_str or "UNAVAILABLE" in err_str:
                     if attempt == 0:
                         if status_box:
-                            status_box.write(f"⏳ `{model}` is experiencing high traffic. Retrying in 2 seconds...")
+                            status_box.write(f"⏳ `{model}` busy (high traffic), pausing 2s...")
                         time.sleep(2.0)
                         continue
                     else:
-                        if status_box:
-                            status_box.write(f"⚠️ `{model}` busy, switching to backup model...")
                         break  # Move to next candidate model
-                # Check for 429 (RESOURCE_EXHAUSTED / Quota limit reached for this specific model)
+                # Check for 429 (RESOURCE_EXHAUSTED / Quota limit reached)
                 elif "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    quota_hit = True
                     if status_box:
-                        status_box.write(f"⚠️ Free quota reached for `{model}`. Switching to next available model...")
+                        status_box.write(f"⚠️ Daily quota reached on `{model}`. Switching to backup model...")
                     break  # Move to next candidate model immediately
-                # Check for 404 (NOT_FOUND / Model deprecated or unavailable)
+                # Check for 404 (NOT_FOUND / Model unavailable)
                 elif "404" in err_str or "NOT_FOUND" in err_str:
-                    if status_box:
-                        status_box.write(f"ℹ️ `{model}` not available on this tier, trying next...")
                     break  # Move to next candidate model immediately
                 else:
-                    # Non-retryable error (e.g. invalid API key)
                     raise e
 
+    if quota_hit:
+        raise RuntimeError(
+            "Daily free quota (20 requests/day) reached for this Google Cloud project. "
+            "To keep testing for free right now, visit https://aistudio.google.com/app/apikey, click 'Create API key in NEW project', and paste the new key into the sidebar!"
+        )
     if last_error:
-        if "429" in str(last_error) or "RESOURCE_EXHAUSTED" in str(last_error):
-            raise RuntimeError(
-                "Free daily quota limit reached on this API key across models. "
-                "Tip: You can create a new free API key in 10 seconds at https://aistudio.google.com/app/apikey and paste it in the sidebar!"
-            )
         raise last_error
     raise RuntimeError("Unable to generate roasts right now due to server capacity. Please wait a few moments and try again.")
 
