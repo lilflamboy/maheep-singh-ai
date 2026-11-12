@@ -440,6 +440,11 @@ Remember:
                         if status_box:
                             status_box.write(f"⚠️ `{model}` busy, switching to backup model...")
                         break  # Move to next candidate model
+                # Check for 429 (RESOURCE_EXHAUSTED / Quota limit reached for this specific model)
+                elif "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    if status_box:
+                        status_box.write(f"⚠️ Free quota reached for `{model}`. Switching to next available model...")
+                    break  # Move to next candidate model immediately
                 # Check for 404 (NOT_FOUND / Model deprecated or unavailable)
                 elif "404" in err_str or "NOT_FOUND" in err_str:
                     if status_box:
@@ -450,6 +455,11 @@ Remember:
                     raise e
 
     if last_error:
+        if "429" in str(last_error) or "RESOURCE_EXHAUSTED" in str(last_error):
+            raise RuntimeError(
+                "Free daily quota limit reached on this API key across models. "
+                "Tip: You can create a new free API key in 10 seconds at https://aistudio.google.com/app/apikey and paste it in the sidebar!"
+            )
         raise last_error
     raise RuntimeError("Unable to generate roasts right now due to server capacity. Please wait a few moments and try again.")
 
